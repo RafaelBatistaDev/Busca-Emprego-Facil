@@ -1,0 +1,16 @@
+[Desktop Entry]
+Version=1.0.0
+Type=Application
+Name=Busca Emprego Fáçil
+GenericName=Visualizador Web
+Comment=Busca Emprego
+Exec=BuscaEmpregoFáçil %U
+Icon=buscaempregofacil
+Terminal=false
+Categories=Development;WebBrowser;Utility;
+MimeType=text/html;application/xhtml+xml;
+Keywords=Busca;Emprego;Fáçil;webview;web;viewer;
+StartupWMClass=buscadeempregofácil
+StartupNotify=true
+X-KDE-StartupNotify=true
+SingleWindow=true

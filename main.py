@@ -2087,7 +2087,7 @@ def favicon() -> Response:
 @app.get('/buscaempregofacil.png')
 def get_logo():
     """Serve a logo buscaempregofacil.png se existir localmente."""
-    logo_path = BASE_DIR / "config" / "buscaempregofacil.png"
+    logo_path = BASE_DIR / "assets" / "buscaempregofacil.png"
     if logo_path.exists():
         return FileResponse(logo_path)
     user_icon = Path.home() / ".local" / "share" / "icons" / "buscaempregofacil.png"
@@ -2184,13 +2184,13 @@ def configurar_desktop() -> None:
         apps_dir.mkdir(parents=True, exist_ok=True)
         icons_dir.mkdir(parents=True, exist_ok=True)
         
-        src_icon = BASE_DIR / "config" / "buscaempregofacil.png"
+        src_icon = BASE_DIR / "assets" / "buscaempregofacil.png"
         dst_icon = icons_dir / "buscaempregofacil.png"
         
         if src_icon.exists():
             shutil.copy2(src_icon, dst_icon)
         
-        src_desktop = BASE_DIR / "config" / "buscaempregofacil.desktop"
+        src_desktop = BASE_DIR / "assets" / "buscaempregofacil.desktop"
         dst_desktop = apps_dir / "buscaempregofacil.desktop"
         
         if src_desktop.exists():
