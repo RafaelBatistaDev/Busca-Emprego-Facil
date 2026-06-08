@@ -24,6 +24,18 @@ Depois de rodar o aplicativo pela primeira vez (Método 1), você não precisar�
 2. Procure por **Busca Emprego Fácil**.
 3. Clique no atalho para carregar o aplicativo de vagas diretamente em sua janela dedicada do WebView.
 
+### Método 3: Preparação e Instalação Manual do Ambiente Virtual (Opcional)
+Se preferir configurar o ambiente virtual do projeto de forma explícita e manual:
+```bash
+uv venv
+uv add pywebview
+uv add PyQt6 PyQt6-WebEngine playwright
+source .venv/bin/activate
+uv sync --all-groups
+uv run main.py
+```
+*(Esta alternativa inicializa a pasta de ambiente `.venv` localmente e instala as dependências gráficas manualmente no ambiente antes da execução).*
+
 ---
 
 ## 🌟 Funcionalidades Principais
