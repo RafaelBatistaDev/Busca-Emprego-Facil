@@ -1,0 +1,105 @@
+# ─────────────────────────────────────────────────────────────
+
+# ── Secrets ───────────────────────────────────────────────────
+*.env
+.env
+.env.local
+.env.*.local
+**/.claude.json
+config/.claude.json
+config/agents.json
+
+# ── Rust / Cargo ──────────────────────────────────────────────
+target/
+**/target/**
+*.rlib
+*.rmeta
+*.d
+*.pdb
+# Logs de profiling/cobertura do Rust
+*.profraw
+*.bk
+
+# ── Python / uv ───────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.python-version
+uv.lock
+.uv/
+
+# ── Node.js ───────────────────────────────────────────────────
+node_modules/
+dist/
+out/
+*.vsix
+
+# ── Logs ativos ───────────────────────────────────────────────
+*.log
+**/logs/
+
+# ── ClawRafaelIA ──────────────────────────────────────────────
+~/.claw/
+.claw/cache/
+.claw/logs/
+
+# ── Microsoft OneNote ─────────────────────────────────────────
+*.one
+*.one.conflict*
+*.onetoc2
+OneNote_RecycleBin/
+
+# ── Rclone ────────────────────────────────────────────────────
+.rclone_ignore
+.needs-resync
+*.lck
+
+# ── IDEs e ferramentas ────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Sistema e temporários ─────────────────────────────────────
+.DS_Store
+Thumbs.db
+thumbs.db
+.cache/
+*.tmp
+
+# ── Google Drive — pastas protegidas ──────────────────────────
+Personal Vault/
+Cofre Pessoal/
+
+# ── Git Internals e Backups ────────────────────────────────────
+.git/
+HEAD
+FETCH_HEAD
+ORIG_HEAD
+config
+description
+objects/
+refs/
+hooks/
+info/
+github-bare/
+**/github-bare/**/*.git/
+.rcloneignore
+state.json
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+*.swp
+*.swo
+*tar.gz
+*.zip
+*.7z
+*.log
+*.csv
+*.xlsx
+*.docx
