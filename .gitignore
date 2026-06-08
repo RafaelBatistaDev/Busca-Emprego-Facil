@@ -100,6 +100,3 @@ state.json
 *.zip
 *.7z
 *.log
-*.csv
-*.xlsx
-*.docx
