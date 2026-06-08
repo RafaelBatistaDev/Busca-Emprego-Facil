@@ -76,15 +76,15 @@ Cofre Pessoal/
 
 # ── Git Internals e Backups ────────────────────────────────────
 .git/
-HEAD
-FETCH_HEAD
-ORIG_HEAD
-config
-description
-objects/
-refs/
-hooks/
-info/
+.git/HEAD
+.git/FETCH_HEAD
+.git/ORIG_HEAD
+.git/config
+.git/description
+.git/objects/
+.git/refs/
+.git/hooks/
+.git/info/
 github-bare/
 **/github-bare/**/*.git/
 .rcloneignore
