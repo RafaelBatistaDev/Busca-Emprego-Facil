@@ -2314,8 +2314,13 @@ def main() -> None:
             webview.create_window("Busca Emprego Fácil", f"http://{args.host}:{args.port}", width=1000, height=700)
             webview.start()
         except Exception as e:
-            print(f"\nNão foi possível abrir a janela nativa ({e}).")
-            print(f"Fazendo fallback: abrindo no navegador padrão do sistema...")
+            print(f"\n[Aviso] Não foi possível abrir a janela nativa local ({e}).")
+            print("Isso geralmente ocorre por falta de dependências do sistema para renderização gráfica (Qt6-WebEngine).")
+            print("Para habilitar a janela nativa, instale as dependências correspondentes à sua distribuição:")
+            print("  • Fedora/RHEL   : sudo dnf install qt6-qtwebengine")
+            print("  • Ubuntu/Debian : sudo apt install libqt6webenginecore6")
+            print("  • Arch Linux    : sudo pacman -S qt6-webengine")
+            print("\nFazendo fallback: abrindo no navegador padrão do sistema...")
             
             import webbrowser
             def abrir_navegador():
