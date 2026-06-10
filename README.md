@@ -1,6 +1,6 @@
 # Busca Emprego Fácil
 
-Uma ferramenta moderna, profissional e de arquivo único para consolidação e busca de vagas de emprego. O projeto une um painel de controle web responsivo (SPA) e 10 scrapers (nacionais e regionais de Pernambuco) rodando inteiramente em cache volátil (memória RAM) para máxima compatibilidade com sistemas imutáveis (como o Fedora Kinoite / COSMIC).
+Uma ferramenta moderna, profissional e de arquivo único para consolidação e busca de vagas de emprego. O projeto une um painel de controle web responsivo (SPA) e 14 scrapers (nacionais e regionais de Pernambuco) rodando inteiramente em cache volátil (memória RAM) para máxima compatibilidade com sistemas imutáveis (como o Fedora Kinoite / COSMIC).
 
 A janela nativa abre com dimensões otimizadas de 1000x700 pixels e o aplicativo configura automaticamente seu próprio ícone e atalho no seu lançador de aplicativos Linux.
 
@@ -91,6 +91,11 @@ O mecanismo varre e unifica as vagas encontradas nos seguintes portais:
 8. Blogspot PE (Feed RSS)
 9. Google News
 10. Jobrapido
+11. Recife Vagas (Feed RSS local de Pernambuco)
+12. Vagas PE (Feed RSS local de Pernambuco)
+13. Trabalha Brasil (Nacional/Local via Web Scraping)
+14. Talent.com (Nacional/Local via Web Scraping)
+15. Google Jobs (Coleta automatizada via QtWebEngine das pesquisas do Google Recife/PE e Pernambuco)
 
 ---
 

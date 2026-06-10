@@ -83,6 +83,7 @@ CONFIG_PADRAO = {
   "localizacao": "Recife, PE",
   "max_vagas_por_plataforma": 10,
   "delay_entre_requisicoes": 2.5,
+  "limite_dias": 5,
   "plataformas": [
     "gupy",
     "linkedin",
@@ -93,7 +94,12 @@ CONFIG_PADRAO = {
     "comunidadeempregope",
     "blogspot_pe",
     "google_news",
-    "jobrapido"
+    "jobrapido",
+    "recifevagas",
+    "vagaspe",
+    "trabalhabrasil",
+    "talent",
+    "google_jobs"
   ]
 }
 
@@ -145,18 +151,52 @@ def get_json_out() -> Path:
 
 # --- CACHE EM MEMÓRIA ---
 CONFIG_MEM = CONFIG_PADRAO.copy()
+if CONFIG_FILE.exists():
+    try:
+        content = CONFIG_FILE.read_text(encoding="utf-8")
+        data = json.loads(content)
+        for k, v in CONFIG_PADRAO.items():
+            if k not in data:
+                data[k] = v
+        CONFIG_MEM = data
+    except Exception:
+        pass
+
 VAGAS_CACHE = []
 
-# --- CONFIGURAÇÃO (CARREGAR / SALVAR EM MEMÓRIA) ---
+# --- CONFIGURAÇÃO (CARREGAR / SALVAR EM MEMÓRIA E ARQUIVO) ---
 def carregar_config() -> dict:
-    """Carrega as configurações a partir da memória."""
+    """Carrega as configurações a partir do arquivo JSON ou da memória."""
     global CONFIG_MEM
+    if CONFIG_FILE.exists():
+        try:
+            content = CONFIG_FILE.read_text(encoding="utf-8")
+            data = json.loads(content)
+            # Preenche chaves ausentes da configuração padrão
+            for k, v in CONFIG_PADRAO.items():
+                if k not in data:
+                    data[k] = v
+            CONFIG_MEM = data
+        except Exception as e:
+            warn(f"Erro ao carregar configurações do arquivo {CONFIG_FILE}: {e}")
     return CONFIG_MEM
 
 def salvar_config(config_data: dict) -> None:
-    """Salva as configurações na memória."""
+    """Salva as configurações na memória e persiste no arquivo JSON."""
     global CONFIG_MEM
     CONFIG_MEM = config_data
+    try:
+        CONFIG_FILE.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        warn(f"Erro ao salvar configurações no arquivo {CONFIG_FILE}: {e}")
+
+
+def reset_config_to_default() -> None:
+    """Reseta o arquivo de configuração config_vagas.json para o padrão."""
+    try:
+        CONFIG_FILE.write_text(json.dumps(CONFIG_PADRAO, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 # --- MODELOS ---
@@ -564,6 +604,8 @@ class GoogleNewsScraper(BaseScraper):
         "seleção simplificada pernambuco",
         "processo seletivo recife PE",
         "edital concurso público pernambuco",
+        "empregos pernambuco",
+        "empregos recife",
     ]
 
     def _parse_data_rss(self, data_str: str) -> datetime | None:
@@ -710,6 +752,318 @@ class JobrapidoScraper(BaseScraper):
         return vagas
 
 
+class RecifeVagasScraper(BaseScraper):
+    nome = "RecifeVagas"
+    RSS_URL = "https://recifevagas.com.br/feed/"
+
+    def buscar(self) -> list[Vaga]:
+        vagas: list[Vaga] = []
+        resp = self._get(self.RSS_URL)
+        if not resp:
+            return []
+        try:
+            root = ET.fromstring(resp.content)
+            items = root.findall(".//item")
+        except Exception:
+            return []
+        
+        keywords_lower = [k.lower() for k in self.keywords]
+        for item in items[: self.max_vagas * 3]:
+            try:
+                titulo = item.findtext("title", "").strip()
+                link = item.findtext("link", "").strip()
+                desc_raw = item.findtext("description", "").strip() or item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded", "").strip()
+                pubdate = item.findtext("pubDate", "").strip()
+                
+                desc_soup = BeautifulSoup(desc_raw, "html.parser")
+                desc = desc_soup.get_text(separator=" ", strip=True)[:500]
+                
+                texto = (titulo + " " + desc).lower()
+                if not any(kw in texto for kw in keywords_lower):
+                    continue
+                
+                empresa = self._extrair_empresa(desc)
+                local = self._extrair_local(titulo, desc)
+                
+                vagas.append(Vaga(
+                    titulo=titulo,
+                    empresa=empresa,
+                    localizacao=local,
+                    url=link,
+                    plataforma="RecifeVagas",
+                    descricao=desc[:300],
+                    data_postagem=pubdate,
+                ))
+                if len(vagas) >= self.max_vagas:
+                    break
+            except Exception:
+                pass
+        return vagas
+
+    def _extrair_empresa(self, texto: str) -> str:
+        padroes = [
+            r"empresa[:\s]+([A-Z][^\n,\.]{2,40})",
+            r"contratante[:\s]+([A-Z][^\n,\.]{2,40})",
+            r"(?:vaga|oportunidade)\s+(?:na|no|em)\s+([A-Z][^\n,\.]{2,40})",
+        ]
+        for padrao in padroes:
+            match = re.search(padrao, texto, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return "N/D"
+
+    def _extrair_local(self, titulo: str, texto: str) -> str:
+        if "–" in titulo:
+            partes = titulo.split("–")
+            if len(partes) > 1:
+                return partes[-1].strip()
+        elif "-" in titulo:
+            partes = titulo.split("-")
+            if len(partes) > 1:
+                potential_local = partes[-1].strip()
+                if "PE" in potential_local or any(c in potential_local for c in ["Recife", "Olinda", "Paulista", "Jaboatão"]):
+                    return potential_local
+                    
+        cidades_pe = ["Recife", "Jaboatão", "Caruaru", "Olinda", "Paulista", "Cabo de Santo Agostinho", "Camaragibe", "Garanhuns", "Petrolina", "Vitória de Santo Antão"]
+        for cidade in cidades_pe:
+            if cidade.lower() in titulo.lower():
+                return f"{cidade} - PE"
+        for cidade in cidades_pe:
+            if cidade.lower() in texto.lower():
+                return f"{cidade} - PE"
+        return "Recife - PE"
+
+
+class VagasPEScraper(BaseScraper):
+    nome = "VagasPE"
+    RSS_URL = "https://vagaspe.com.br/feed/"
+
+    def buscar(self) -> list[Vaga]:
+        vagas: list[Vaga] = []
+        resp = self._get(self.RSS_URL)
+        if not resp:
+            return []
+        try:
+            root = ET.fromstring(resp.content)
+            items = root.findall(".//item")
+        except Exception:
+            return []
+        
+        keywords_lower = [k.lower() for k in self.keywords]
+        for item in items[: self.max_vagas * 3]:
+            try:
+                titulo = item.findtext("title", "").strip()
+                link = item.findtext("link", "").strip()
+                desc_raw = item.findtext("description", "").strip() or item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded", "").strip()
+                pubdate = item.findtext("pubDate", "").strip()
+                
+                desc_soup = BeautifulSoup(desc_raw, "html.parser")
+                desc = desc_soup.get_text(separator=" ", strip=True)[:500]
+                
+                texto = (titulo + " " + desc).lower()
+                if not any(kw in texto for kw in keywords_lower):
+                    continue
+                
+                empresa = self._extrair_empresa(titulo, desc)
+                local = self._extrair_local(titulo, desc)
+                
+                vagas.append(Vaga(
+                    titulo=titulo,
+                    empresa=empresa,
+                    localizacao=local,
+                    url=link,
+                    plataforma="VagasPE",
+                    descricao=desc[:300],
+                    data_postagem=pubdate,
+                ))
+                if len(vagas) >= self.max_vagas:
+                    break
+            except Exception:
+                pass
+        return vagas
+
+    def _extrair_empresa(self, titulo: str, texto: str) -> str:
+        if "abre vaga para" in titulo.lower():
+            partes = re.split(r"\babre vaga para\b", titulo, flags=re.IGNORECASE)
+            if partes and len(partes) > 1:
+                emp = partes[0].strip()
+                if emp and len(emp) > 2:
+                    return emp
+        padroes = [
+            r"empresa[:\s]+([A-Z][^\n,\.]{2,40})",
+            r"contratante[:\s]+([A-Z][^\n,\.]{2,40})",
+            r"(?:vaga|oportunidade)\s+(?:na|no|em)\s+([A-Z][^\n,\.]{2,40})",
+        ]
+        for padrao in padroes:
+            match = re.search(padrao, texto, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return "N/D"
+
+    def _extrair_local(self, titulo: str, texto: str) -> str:
+        match = re.search(r"\bem\s+([A-Z\xc0-\xff][a-zA-Z\xc0-\xff\s]+)(?:-|\b)", titulo)
+        if match:
+            cidade = match.group(1).strip()
+            cidade_clean = re.sub(r"\b(Pernambuco|PE)\b", "", cidade, flags=re.IGNORECASE).strip()
+            if cidade_clean and len(cidade_clean) > 2:
+                return f"{cidade_clean} - PE"
+
+        cidades_pe = ["Recife", "Jaboatão", "Caruaru", "Olinda", "Paulista", "Cabo de Santo Agostinho", "Camaragibe", "Garanhuns", "Petrolina", "Vitória de Santo Antão"]
+        for cidade in cidades_pe:
+            if cidade.lower() in titulo.lower():
+                return f"{cidade} - PE"
+        for cidade in cidades_pe:
+            if cidade.lower() in texto.lower():
+                return f"{cidade} - PE"
+        return "Pernambuco"
+
+
+class TrabalhaBrasilScraper(BaseScraper):
+    nome = "TrabalhaBrasil"
+    BASE_URL = "https://www.trabalhabrasil.com.br"
+
+    def _normalizar_slug(self, texto: str) -> str:
+        texto_norm = normalizar_texto(texto)
+        texto_norm = re.sub(r"\s+", "-", texto_norm)
+        texto_norm = re.sub(r"[^\w\-]", "", texto_norm)
+        return texto_norm
+
+    def buscar(self) -> list[Vaga]:
+        vagas: list[Vaga] = []
+        
+        local_slug = ""
+        if self.localizacao:
+            loc_f = self.localizacao.replace(",", " ").replace("-", " ")
+            partes = [self._normalizar_slug(p) for p in loc_f.split() if p.strip()]
+            if partes:
+                local_slug = "-".join(partes)
+
+        for kw in self.keywords:
+            kw_slug = self._normalizar_slug(kw)
+            if local_slug:
+                url = f"{self.BASE_URL}/vagas-de-emprego-em-{local_slug}/{kw_slug}"
+            else:
+                url = f"{self.BASE_URL}/vagas-de-emprego/{kw_slug}"
+                
+            resp = self._get(url)
+            if not resp:
+                continue
+                
+            soup = BeautifulSoup(resp.text, "html.parser")
+            cards = soup.select("a.job-link")
+            for card in cards[: self.max_vagas]:
+                try:
+                    title_el = card.select_one(".job-title")
+                    company_el = card.select_one(".job-company")
+                    location_el = card.select_one(".job-location")
+                    salary_el = card.select_one(".salary")
+                    
+                    if not title_el:
+                        continue
+                        
+                    href = card.get("href", "")
+                    url_vaga = href if href.startswith("http") else f"{self.BASE_URL}{href}"
+                    
+                    vagas.append(Vaga(
+                        titulo=title_el.get_text(strip=True),
+                        empresa=company_el.get_text(strip=True) if company_el else "N/D",
+                        localizacao=location_el.get_text(strip=True) if location_el else self.localizacao,
+                        url=url_vaga,
+                        plataforma="TrabalhaBrasil",
+                        salario=salary_el.get_text(strip=True) if salary_el else "",
+                        descricao="Veja detalhes no site do Trabalha Brasil.",
+                    ))
+                except Exception:
+                    pass
+        return vagas
+
+
+class TalentScraper(BaseScraper):
+    nome = "Talent"
+    BASE_URL = "https://br.talent.com/jobs"
+
+    def buscar(self) -> list[Vaga]:
+        vagas: list[Vaga] = []
+        for kw in self.keywords:
+            params = {"k": kw}
+            if self.localizacao:
+                params["l"] = self.localizacao
+                
+            resp = self._get(self.BASE_URL, params=params)
+            if not resp:
+                continue
+                
+            soup = BeautifulSoup(resp.text, "html.parser")
+            cards = soup.select("[class*='JobCard_card__']")
+            for card in cards[: self.max_vagas]:
+                try:
+                    title_el = card.select_one("[class*='JobCard_title__']")
+                    company_el = card.select_one("[class*='JobCard_company__']")
+                    location_el = card.select_one("[class*='JobCard_location__']")
+                    desc_el = card.select_one("[class*='JobCard_body__']")
+                    link_el = card.select_one('a[href*="/view?id="]')
+                    
+                    if not title_el:
+                        continue
+                        
+                    href = link_el.get("href", "") if link_el else ""
+                    url_vaga = href if href.startswith("http") else f"https://br.talent.com{href}"
+                    
+                    vagas.append(Vaga(
+                        titulo=title_el.get_text(strip=True),
+                        empresa=company_el.get_text(strip=True) if company_el else "N/D",
+                        localizacao=location_el.get_text(strip=True) if location_el else self.localizacao,
+                        url=url_vaga,
+                        plataforma="Talent",
+                        descricao=desc_el.get_text(strip=True)[:300] if desc_el else "",
+                    ))
+                except Exception:
+                    pass
+        return vagas
+
+
+class GoogleJobsScraper(BaseScraper):
+    nome = "GoogleJobs"
+
+    def buscar(self) -> list[Vaga]:
+        vagas: list[Vaga] = []
+        import subprocess
+        import sys
+        import json
+        
+        cmd = [sys.executable, __file__, "--google-jobs-worker"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+            if res.returncode == 0:
+                json_text = ""
+                for line in res.stdout.splitlines():
+                    if line.strip().startswith("{") or line.strip().startswith("["):
+                        json_text = line.strip()
+                        break
+                if not json_text:
+                    json_text = res.stdout.strip()
+                
+                data = json.loads(json_text)
+                for key, jobs_list in data.items():
+                    for job in jobs_list:
+                        vagas.append(Vaga(
+                            titulo=job["titulo"],
+                            empresa=job["empresa"],
+                            localizacao=job["localizacao"],
+                            url=job["url"],
+                            plataforma="GoogleJobs",
+                            descricao=job["descricao"],
+                            data_postagem=job["data_postagem"]
+                        ))
+            else:
+                warn(f"[{self.nome}] Worker exited with code {res.returncode}. Stderr: {res.stderr}")
+        except subprocess.TimeoutExpired:
+            warn(f"[{self.nome}] Worker timeout expired.")
+        except Exception as e:
+            warn(f"[{self.nome}] Worker failed: {e}")
+        return vagas
+
+
 # --- REGISTRO DE MOTOR DE BUSCA ---
 SCRAPERS_MAP: dict[str, type[BaseScraper]] = {
     "gupy":                 GupyScraper,
@@ -722,6 +1076,11 @@ SCRAPERS_MAP: dict[str, type[BaseScraper]] = {
     "google_news":          GoogleNewsScraper,
     "infojobs_geo":         InfoJobsGeoScraper,
     "jobrapido":            JobrapidoScraper,
+    "recifevagas":          RecifeVagasScraper,
+    "vagaspe":              VagasPEScraper,
+    "trabalhabrasil":       TrabalhaBrasilScraper,
+    "talent":               TalentScraper,
+    "google_jobs":          GoogleJobsScraper,
 }
 
 # --- PROCESSAMENTO E BUSCA ---
@@ -764,6 +1123,87 @@ def salvar_json_hunter(vagas: list[Vaga], caminho: Path) -> None:
     except Exception as e:
         warn(f"Não foi possível salvar o arquivo JSON localmente: {e}")
 
+def parse_date_postagem(date_str: str) -> datetime | None:
+    if not date_str:
+        return None
+    
+    date_str = date_str.strip()
+    
+    # 1. Tenta formatar YYYY-MM-DD
+    match = re.match(r"^(\d{4})[-/](\d{2})[-/](\d{2})", date_str)
+    if match:
+        try:
+            return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            pass
+            
+    # 2. Tenta formatar DD/MM/YYYY
+    match = re.match(r"^(\d{2})[-/](\d{2})[-/](\d{4})", date_str)
+    if match:
+        try:
+            return datetime(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            pass
+
+    # 3. Tenta RFC 822 (ex: Tue, 08 Jun 2026 12:34:56 GMT)
+    meses = {
+        "jan": 1, "feb": 2, "fev": 2, "mar": 3, "apr": 4, "abr": 4,
+        "may": 5, "mai": 5, "jun": 6, "jul": 7, "aug": 8, "ago": 8,
+        "sep": 9, "set": 9, "oct": 10, "out": 10, "nov": 11, "dec": 12, "dez": 12
+    }
+    
+    match = re.search(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})", date_str)
+    if match:
+        day = int(match.group(1))
+        month_str = match.group(2).lower()
+        year = int(match.group(3))
+        month = meses.get(month_str[:3], 1)
+        try:
+            return datetime(year, month, day)
+        except ValueError:
+            pass
+
+    # 4. Relativos em português
+    from datetime import timedelta
+    hoje = datetime.now()
+    if "hoje" in date_str.lower() or "hora" in date_str.lower():
+        return hoje
+    if "ontem" in date_str.lower():
+        return hoje - timedelta(days=1)
+        
+    match = re.search(r"(\d+)\s+dia", date_str, re.IGNORECASE)
+    if match:
+        days = int(match.group(1))
+        return hoje - timedelta(days=days)
+        
+    return None
+
+def filtrar_por_data(vagas: list[Vaga], limite_dias: int) -> list[Vaga]:
+    if limite_dias <= 0:
+        return vagas
+    
+    from datetime import timedelta
+    hoje = datetime.now()
+    limite = hoje - timedelta(days=limite_dias)
+    
+    filtradas = []
+    for v in vagas:
+        dt = parse_date_postagem(v.data_postagem)
+        if dt:
+            dt_zero = datetime(dt.year, dt.month, dt.day)
+            limite_zero = datetime(limite.year, limite.month, limite.day)
+            if dt_zero >= limite_zero:
+                filtradas.append(v)
+        else:
+            filtradas.append(v)
+            
+    antes = len(vagas)
+    removidas = antes - len(filtradas)
+    if removidas:
+        warn(f"{removidas} vagas mais antigas que {limite_dias} dias foram removidas pelo filtro temporal.")
+        
+    return filtradas
+
 def executar_busca(config: dict) -> list[Vaga]:
     todas: list[Vaga] = []
     for nome in config.get("plataformas", []):
@@ -805,6 +1245,8 @@ def executar_busca(config: dict) -> list[Vaga]:
     if duplicadas:
         log(f"{duplicadas} duplicatas removidas (por título/empresa/URL).")
     unicas = filtrar_por_localizacao(unicas, config["localizacao"])
+    limite_dias = int(config.get("limite_dias", 5))
+    unicas = filtrar_por_data(unicas, limite_dias)
     return unicas
 
 
@@ -1187,6 +1629,11 @@ INDEX_HTML = r"""<!DOCTYPE html>
         .badge-blogspot_pe { background: rgba(249, 115, 22, 0.12); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.2); }
         .badge-google_news { background: rgba(59, 130, 246, 0.12); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.2); }
         .badge-jobrapido { background: rgba(20, 184, 166, 0.12); color: #2dd4bf; border: 1px solid rgba(20, 184, 166, 0.2); }
+        .badge-recifevagas { background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.2); }
+        .badge-vagaspe { background: rgba(236, 72, 153, 0.12); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.2); }
+        .badge-trabalhabrasil { background: rgba(234, 179, 8, 0.12); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.2); }
+        .badge-talent { background: rgba(168, 85, 247, 0.12); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.2); }
+        .badge-googlejobs { background: rgba(66, 133, 244, 0.12); color: #4285f4; border: 1px solid rgba(66, 133, 244, 0.2); }
         .badge-other { background: rgba(100, 116, 139, 0.12); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.2); }
         
         .vaga-body {
@@ -1320,7 +1767,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
         
         .form-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 16px;
         }
         
@@ -1623,6 +2070,10 @@ INDEX_HTML = r"""<!DOCTYPE html>
                     <input type="text" id="filtro-cidade" placeholder="Cidade ou Localização..." class="filter-input">
                 </div>
                 <div class="filter-group">
+                    <span class="filter-label">Data Exata:</span>
+                    <input type="date" id="data-exata" class="filter-input">
+                </div>
+                <div class="filter-group">
                     <span class="filter-label">De:</span>
                     <input type="date" id="data-inicio" class="filter-input">
                 </div>
@@ -1666,6 +2117,10 @@ INDEX_HTML = r"""<!DOCTYPE html>
                         <label for="delay">Intervalo entre requisições (segundos):</label>
                         <input type="number" id="delay" value="2.5" step="0.1" min="0">
                     </div>
+                    <div class="form-group">
+                        <label for="limite_dias">Limite de Dias (Recentes):</label>
+                        <input type="number" id="limite_dias" value="5" min="0">
+                    </div>
                 </div>
 
                 <div class="form-section-title" style="margin-top: 24px;">Fontes de Pesquisa</div>
@@ -1699,7 +2154,12 @@ INDEX_HTML = r"""<!DOCTYPE html>
             { id: 'comunidadeempregope', label: 'Comunidade PE' },
             { id: 'blogspot_pe', label: 'Blogspot PE' },
             { id: 'google_news', label: 'Google News' },
-            { id: 'jobrapido', label: 'Jobrapido' }
+            { id: 'jobrapido', label: 'Jobrapido' },
+            { id: 'recifevagas', label: 'Recife Vagas' },
+            { id: 'vagaspe', label: 'Vagas PE' },
+            { id: 'trabalhabrasil', label: 'Trabalha Brasil' },
+            { id: 'talent', label: 'Talent.com' },
+            { id: 'google_jobs', label: 'Google Jobs' }
         ];
 
         let vagasAtuais = [];
@@ -1723,11 +2183,13 @@ INDEX_HTML = r"""<!DOCTYPE html>
             
             // Vincular campos de filtro
             const filtroCidade = document.getElementById('filtro-cidade');
+            const filtroDataExata = document.getElementById('data-exata');
             const filtroDataInicio = document.getElementById('data-inicio');
             const filtroDataFim = document.getElementById('data-fim');
             const btnResetar = document.getElementById('btn-resetar-filtros');
             
             if (filtroCidade) filtroCidade.addEventListener('input', filtrarVagas);
+            if (filtroDataExata) filtroDataExata.addEventListener('change', filtrarVagas);
             if (filtroDataInicio) filtroDataInicio.addEventListener('change', filtrarVagas);
             if (filtroDataFim) filtroDataFim.addEventListener('change', filtrarVagas);
             if (btnResetar) btnResetar.addEventListener('click', limparFiltro);
@@ -1805,11 +2267,13 @@ INDEX_HTML = r"""<!DOCTYPE html>
                     const elLocalizacao = document.getElementById('localizacao');
                     const elMaxVagas = document.getElementById('max_vagas');
                     const elDelay = document.getElementById('delay');
+                    const elLimiteDias = document.getElementById('limite_dias');
                     
                     if (elKeywords) elKeywords.value = (data.keywords || []).join(String.fromCharCode(10));
                     if (elLocalizacao) elLocalizacao.value = data.localizacao || 'Recife, PE';
                     if (elMaxVagas) elMaxVagas.value = data.max_vagas_por_plataforma || 20;
                     if (elDelay) elDelay.value = data.delay_entre_requisicoes || 2.5;
+                    if (elLimiteDias) elLimiteDias.value = data.limite_dias !== undefined ? data.limite_dias : 5;
                     
                     const checks = document.querySelectorAll('input[name="plataformas"]');
                     const ativas = data.plataformas || [];
@@ -1829,12 +2293,14 @@ INDEX_HTML = r"""<!DOCTYPE html>
             const elLocalizacao = document.getElementById('localizacao');
             const elMaxVagas = document.getElementById('max_vagas');
             const elDelay = document.getElementById('delay');
+            const elLimiteDias = document.getElementById('limite_dias');
             
             const keywordsText = elKeywords ? elKeywords.value : '';
             const keywords = keywordsText.split(String.fromCharCode(10)).map(k => k.replace(String.fromCharCode(13), '').trim()).filter(k => k);
             const localizacao = elLocalizacao ? elLocalizacao.value : '';
             const max_vagas = elMaxVagas ? (parseInt(elMaxVagas.value, 10) || 20) : 20;
             const delay = elDelay ? (parseFloat(elDelay.value) || 2.5) : 2.5;
+            const limite_dias = elLimiteDias ? (parseInt(elLimiteDias.value, 10) || 0) : 5;
             
             const plataformas = [];
             document.querySelectorAll('input[name="plataformas"]:checked').forEach(chk => {
@@ -1846,6 +2312,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
                 localizacao,
                 max_vagas,
                 delay,
+                limite_dias,
                 plataformas
             };
             
@@ -1878,6 +2345,19 @@ INDEX_HTML = r"""<!DOCTYPE html>
             } catch (e) {
                 console.error('Erro ao ler vagas do cache do servidor:', e);
             }
+        }
+
+        function normalizarDataParaISO(dateStr) {
+            if (!dateStr) return '9999-12-31';
+            dateStr = dateStr.trim();
+            if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+                return dateStr.substring(0, 10);
+            }
+            const match = dateStr.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
+            if (match) {
+                return `${match[3]}-${match[2]}-${match[1]}`;
+            }
+            return '9999-12-31';
         }
 
         function renderizarVagas(vagas) {
@@ -1947,13 +2427,13 @@ INDEX_HTML = r"""<!DOCTYPE html>
                         dataText = `Postada: ${v.data_postagem.substring(0, 10)}`;
                     }
                     
-                    const dataAttr = v.data_coleta ? v.data_coleta.substring(0, 10) : (v.data_postagem ? v.data_postagem.substring(0, 10) : '9999-12-31');
+                    const dataAttr = normalizarDataParaISO(v.data_coleta || v.data_postagem || v.data_busca);
                     card.dataset.data = dataAttr;
                     card.dataset.cidade = (v.localizacao || '').toLowerCase();
                     
                     const platformLower = (v.plataforma || 'other').toLowerCase();
                     let badgeClass = `badge-${platformLower}`;
-                    if (!['gupy', 'linkedin', 'indeed', 'infojobs', 'infojobs_geo', 'empregope', 'comunidadeempregope', 'blogspot_pe', 'google_news', 'jobrapido'].includes(platformLower)) {
+                    if (!['gupy', 'linkedin', 'indeed', 'infojobs', 'infojobs_geo', 'empregope', 'comunidadeempregope', 'blogspot_pe', 'google_news', 'jobrapido', 'recifevagas', 'vagaspe', 'trabalhabrasil', 'talent', 'googlejobs'].includes(platformLower)) {
                         badgeClass = 'badge-other';
                     }
                     
@@ -1982,10 +2462,12 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
         function filtrarVagas() {
             const elFiltroCidade = document.getElementById('filtro-cidade');
+            const elDataExata = document.getElementById('data-exata');
             const elDataInicio = document.getElementById('data-inicio');
             const elDataFim = document.getElementById('data-fim');
             
             const cidadeTermo = elFiltroCidade ? elFiltroCidade.value.toLowerCase().trim() : '';
+            const dataExata = elDataExata ? elDataExata.value : '';
             const dataInicio = elDataInicio ? elDataInicio.value : '';
             const dataFim = elDataFim ? elDataFim.value : '';
             
@@ -1996,7 +2478,9 @@ INDEX_HTML = r"""<!DOCTYPE html>
                 let matchesCidade = !cidadeTermo || cidadeVaga.includes(cidadeTermo);
                 
                 let matchesData = true;
-                if (dataInicio || dataFim) {
+                if (dataExata) {
+                    matchesData = (dataVaga === dataExata);
+                } else if (dataInicio || dataFim) {
                     if (dataInicio && dataVaga < dataInicio) matchesData = false;
                     if (dataFim && dataVaga > dataFim) matchesData = false;
                 }
@@ -2012,10 +2496,12 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
         function limparFiltro() {
             const elFiltroCidade = document.getElementById('filtro-cidade');
+            const elDataExata = document.getElementById('data-exata');
             const elDataInicio = document.getElementById('data-inicio');
             const elDataFim = document.getElementById('data-fim');
             
             if (elFiltroCidade) elFiltroCidade.value = '';
+            if (elDataExata) elDataExata.value = '';
             if (elDataInicio) elDataInicio.value = '';
             if (elDataFim) elDataFim.value = '';
             
@@ -2132,10 +2618,13 @@ async def save_config_api(request: Request):
             'localizacao': config_data.get('localizacao', ''),
             'max_vagas_por_plataforma': int(config_data.get('max_vagas', 20)),
             'delay_entre_requisicoes': float(config_data.get('delay', 2.5)),
+            'limite_dias': int(config_data.get('limite_dias', 5)),
             'plataformas': config_data.get('plataformas', []),
         }
         salvar_config(new_config)
-        return {"status": "success", "message": "Configuração salva com sucesso!"}
+        global VAGAS_CACHE
+        VAGAS_CACHE = []
+        return {"status": "success", "message": "Configuração salva com sucesso! O cache de vagas foi limpo."}
     except Exception as exc:
         return {"status": "error", "message": f"Erro ao salvar configuração: {exc}"}
 
@@ -2232,7 +2721,155 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=CONFIG_FILE, help="Caminho para config JSON")
     parser.add_argument("--host", type=str, default=os.getenv("HOST", "127.0.0.1"), help="Host do servidor")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", 8000)), help="Porta do servidor")
+    parser.add_argument("--google-jobs-worker", action="store_true", help="Executar subprocesso de coleta de vagas do Google Jobs")
     args = parser.parse_args()
+
+    if args.google_jobs_worker:
+        try:
+            os.environ["QT_QPA_PLATFORM"] = "offscreen"
+            from PyQt6.QtCore import QUrl, QTimer
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtWebEngineCore import QWebEnginePage
+
+            class GoogleJobsWorker:
+                def __init__(self):
+                    self.app = QApplication.instance()
+                    if not self.app:
+                        self.app = QApplication(sys.argv)
+                    self.pages = {}
+                    self.results = {}
+                    self.attempts = {}
+                    self.urls = {
+                        "vagas_pe_3dias": (
+                            "https://www.google.com/search?sca_esv=d059007c5155ebc1&biw=1166&bih=416&sxsrf=ANbL-n7v4w18DttYiE14qw6u0QWf31vrXA:1781066266370&q=empregos+pernambuco+nos+%C3%BAltimos+3+dias&uds=ALYpb_ncDc7jTlmw6Mmq7NjuX5c-i-It7OKWwhUQnsvdqcBtw5U8-a91bbKlPS8o62GMIeJHrbWAImhzpIv6Zst2F4KnrDTdrHGj5dkbkNRqzXv431JafFNAofsGkA4SfkKcLpScH0J74IGExZgbdr4o-T9_-Jr9RvCe97TZo-zpujhYEn3lpnTMI9ylVnnbVsOrSLU8b7nTkKv58BrxaSERHWBUC_XyEgdXxZHySuaUcT6K3sqnNi2pnP7MLeUdHoOR8SCJO54DrdoBlI4gSIx_2jwGJ9tDbkSFd-YThOS3jnQFp3A4EqnDGJZK2ylnME2d4paNKp69fk4FdbO5lqg1wH0cQ3PbwhVDFbhilKzVBz_7i5RLXixWjrBjjpNijREeHNz4Eqps&udm=8&sa=X&ved=2ahUKEwiYmoPx7PuUAxUiqpUCHeMkPNcQkbEKegQIGBAD&jbr=sep:0"
+                        ),
+                        "vagas_recife_3dias": (
+                            "https://www.google.com/search?sca_esv=d059007c5155ebc1&biw=1166&bih=416&sxsrf=ANbL-n4JeRK2ynC0VxPOx0ev4mk-fd2hPA:1781066236546&q=empregos+recife+nos+%C3%BAltimos+3+dias&uds=ALYpb_ncDc7jTlmw6Mmq7NjuX5c-nifmoepfz4k_zJkRRjWfM_yBwJ5GU7-uIGayE3qWqRbfZ4b77ffHUIT5Y_s6QjbYjN0gCD9_yEeEjDFJHcBRC7sn8-XKJTA4tkdaM68LYLl_C_M-yNo1droOQgJ2QIZ"
+                        )
+                    }
+                    self.fallbacks = {
+                        "vagas_pe_3dias": "https://www.google.com/search?q=empregos+pernambuco+nos+últimos+3+dias&udm=8",
+                        "vagas_recife_3dias": "https://www.google.com/search?q=empregos+recife+nos+últimos+3+dias&udm=8"
+                    }
+                    self.pending = len(self.urls)
+
+                def start(self):
+                    for key, url in self.urls.items():
+                        self.attempts[key] = "primary"
+                        page = QWebEnginePage()
+                        self.pages[key] = page
+                        page.loadFinished.connect(lambda ok, k=key: self.on_load_finished(ok, k))
+                        page.load(QUrl(url))
+                    
+                    QTimer.singleShot(30000, self.app.quit)
+                    self.app.exec()
+
+                def on_load_finished(self, ok, key):
+                    if ok:
+                        QTimer.singleShot(3000, lambda: self.extract_html(key))
+                    else:
+                        self.handle_failure(key)
+
+                def extract_html(self, key):
+                    page = self.pages[key]
+                    page.runJavaScript("document.documentElement.outerHTML", lambda html: self.parse_html(key, html))
+
+                def parse_html(self, key, html):
+                    soup = BeautifulSoup(html, "html.parser")
+                    cards = soup.find_all("div", class_="GoEOPd")
+                    
+                    if not cards and self.attempts[key] == "primary":
+                        self.attempts[key] = "fallback"
+                        fallback_url = self.fallbacks[key]
+                        page = self.pages[key]
+                        page.load(QUrl(fallback_url))
+                        return
+                        
+                    vagas = []
+                    for c in cards[:10]:
+                        try:
+                            parent_card = c.find_parent("div", id=True)
+                            doc_id = parent_card.get("id") if parent_card else None
+                            
+                            title_el = c.find(class_="tNxQIb")
+                            title = title_el.get_text(strip=True) if title_el else "N/D"
+                            
+                            company_el = c.find(class_="a3jPc")
+                            company = company_el.get_text(strip=True) if company_el else "N/D"
+                            
+                            loc_via_el = c.find(class_="FqK3wc")
+                            loc_via = loc_via_el.get_text(strip=True) if loc_via_el else ""
+                            
+                            location = "Recife - PE" if "recife" in key else "Pernambuco"
+                            via = "Google"
+                            if loc_via:
+                                if "•" in loc_via:
+                                    parts = loc_via.split("•")
+                                    location = parts[0].strip()
+                                    via = parts[1].replace("via", "").strip()
+                                else:
+                                    location = loc_via.strip()
+                            
+                            apply_span = soup.find("span", attrs={"data-encoded-docid": doc_id})
+                            apply_link = apply_span.find("a").get("href") if apply_span and apply_span.find("a") else "N/D"
+                            
+                            desc = ""
+                            if doc_id:
+                                clean_id = doc_id.replace("=", "")
+                                template = soup.find(lambda tag: tag.name == "template" and clean_id in tag.get("id", ""))
+                                if template:
+                                    inner_soup = BeautifulSoup(template.encode_contents(), "html.parser")
+                                    desc_spans = inner_soup.find_all("span", class_=["OOyDTc", 'ejCXj'])
+                                    desc = "\n".join([s.get_text(strip=True) for s in desc_spans if s.get_text(strip=True)])
+                                    if not desc:
+                                        desc = inner_soup.get_text(" ", strip=True)
+                            
+                            vagas.append({
+                                "titulo": title,
+                                "empresa": f"{company} (via {via})" if via else company,
+                                "localizacao": location,
+                                "url": apply_link,
+                                "descricao": desc[:300],
+                                "data_postagem": "Recentemente"
+                            })
+                        except Exception:
+                            pass
+
+                    self.results[key] = vagas
+                    self.pending -= 1
+                    if self.pending == 0:
+                        self.app.quit()
+
+                def handle_failure(self, key):
+                    if self.attempts[key] == "primary":
+                        self.attempts[key] = "fallback"
+                        fallback_url = self.fallbacks[key]
+                        page = self.pages[key]
+                        page.load(QUrl(fallback_url))
+                    else:
+                        self.results[key] = []
+                        self.pending -= 1
+                        if self.pending == 0:
+                            self.app.quit()
+
+            worker = GoogleJobsWorker()
+            worker.start()
+            print(json.dumps(worker.results, ensure_ascii=False))
+            sys.exit(0)
+        except Exception as e:
+            sys.stderr.write(f"Worker Error: {e}\n")
+            sys.exit(1)
+
+    # Se não for o worker do Google Jobs, realiza o reset no startup e registra atexit
+    try:
+        global CONFIG_MEM
+        CONFIG_MEM = CONFIG_PADRAO.copy()
+        CONFIG_FILE.write_text(json.dumps(CONFIG_PADRAO, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    import atexit
+    atexit.register(reset_config_to_default)
 
     if args.cli:
         # Modo CLI
