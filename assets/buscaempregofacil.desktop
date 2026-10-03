@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0.0
+Type=Application
+Name=Busca Emprego Fácil
+GenericName=Busca de Vagas de Emprego
+Comment=Consolida e busca vagas de emprego em múltiplas plataformas
+Exec=uv run main.py
+Icon=buscaempregofacil
+Terminal=false
+Categories=Office;Utility;
+Keywords=emprego;vaga;trabalho;recife;pernambuco;gupy;linkedin;indeed;
+StartupWMClass=buscaempregofacil
+StartupNotify=true
+SingleWindow=true
